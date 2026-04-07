@@ -115,6 +115,7 @@ export default function App() {
   const [allData, setAllData] = useState({});
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [selComp, setSelComp] = useState("");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -269,7 +270,7 @@ export default function App() {
               <p style={{fontSize:14,fontWeight:600,marginBottom:12}}>📊 대시보드 바로가기</p>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {companies.map(c=>(
-                  <button key={c} className="btn btn-ghost" style={{fontSize:13}} onClick={()=>{setCompany(c);setPhase("dashboard")}}>{c} ({allData[c].length}명)</button>
+                  <button key={c} className="btn btn-ghost" style={{fontSize:13}} onClick={()=>{setCompany(c);setSelComp(c);setPhase("dashboard")}}>{c} ({allData[c].length}명)</button>
                 ))}
               </div>
             </div>
@@ -365,7 +366,7 @@ export default function App() {
             ))}
           </div>
           <div style={{display:"flex",gap:8,marginTop:8}}>
-            <button className="btn btn-primary" onClick={()=>{setPhase("dashboard")}}>회사 대시보드 →</button>
+            <button className="btn btn-primary" onClick={()=>{setSelComp(company);setPhase("dashboard")}}>회사 대시보드 →</button>
             <button className="btn btn-ghost" onClick={()=>{setPhase("intro");setAnswers(Array(12).fill(0));setCurrent(0);}}>처음으로</button>
           </div>
         </div>
@@ -375,8 +376,8 @@ export default function App() {
 
   if (phase === "dashboard") {
     const companies = Object.keys(allData);
-    const [selComp, setSelComp] = useState(company || companies[0] || "");
-    const cs = companyStats(selComp);
+    const activeComp = selComp || company || companies[0] || "";
+    const cs = companyStats(activeComp);
     return (
       <div><style>{css}</style>
         <div className="wrap fade-in">
@@ -386,7 +387,7 @@ export default function App() {
           <p className="sub">회사를 선택하면 누적된 응답의 평균 통계를 확인할 수 있습니다.</p>
           <div className="tab-row">
             {companies.map(c=>(
-              <button key={c} className={`tab ${selComp===c?"active":""}`} onClick={()=>setSelComp(c)}>{c} ({allData[c].length})</button>
+              <button key={c} className={`tab ${activeComp===c?"active":""}`} onClick={()=>setSelComp(c)}>{c} ({allData[c].length})</button>
             ))}
             <button className="btn btn-ghost" style={{fontSize:12,padding:"6px 14px"}} onClick={fetchData}>
               {loading ? "새로고침 중..." : "🔄 새로고침"}
@@ -420,7 +421,7 @@ export default function App() {
               <div className="card">
                 <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>응답자 목록</p>
                 <div style={{fontSize:13,color:"var(--c-text-sub)"}}>
-                  {allData[selComp].map((e,i)=>(
+                  {allData[activeComp].map((e,i)=>(
                     <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--c-border)"}}>
                       <span style={{color:"var(--c-text)"}}>{e.name||`응답자 ${i+1}`}</span>
                       <span style={{fontWeight:600}}>평균 {avg(e.answers).toFixed(2)}</span>
