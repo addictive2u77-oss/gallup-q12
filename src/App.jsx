@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyCsiGnnVEY2Ih6ZXrD6MV-6uHNtHvLa4hjnBTul55ah1TGoXx2xSdRMXrQWh2W4vab/exec";
+
 const Q12 = [
   "나는 회사에서 나에게 기대하는 것이 무엇인지 알고 있다.",
   "나는 업무를 제대로 수행하는 데 필요한 자료와 장비를 갖추고 있다.",
@@ -45,11 +47,10 @@ function RadarChart({ data, size = 260 }) {
   const points = data.map((d, i) => {
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
     const val = (d.value / 5) * r;
-    return { x: cx + Math.cos(angle) * val, y: cy + Math.sin(angle) * val, lx: cx + Math.cos(angle) * (r + 18), ly: cy + Math.sin(angle) * (r + 18), label: d.label };
+    return { x: cx + Math.cos(angle) * val, y: cy + Math.sin(angle) * val, lx: cx + Math.cos(angle) * (r + 22), ly: cy + Math.sin(angle) * (r + 22), label: d.label, color: d.color };
   });
   const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ") + "Z";
   const gridLevels = [1, 2, 3, 4, 5];
-
   return (
     <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
       {gridLevels.map((lv) => {
@@ -67,52 +68,103 @@ function RadarChart({ data, size = 260 }) {
       <path d={path} fill="rgba(74,140,42,0.15)" stroke="#4a8c2a" strokeWidth={2} />
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={p.x} cy={p.y} r={3.5} fill="#4a8c2a" />
-          <text x={p.lx} y={p.ly} textAnchor="middle" dominantBaseline="middle" fontSize={9} fill="var(--c-text-sub)">{p.label}</text>
+          <circle cx={p.x} cy={p.y} r={4} fill={p.color || "#4a8c2a"} />
+          <text x={p.lx} y={p.ly} textAnchor="middle" dominantBaseline="middle" fontSize={10} fontWeight="600" fill="var(--c-text)">{p.label}</text>
         </g>
       ))}
     </svg>
   );
 }
 
+function CategoryBarChart({ catAvgs }) {
+  const maxVal = 5;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {catAvgs.map((c, i) => {
+        const pct = (c.value / maxVal) * 100;
+        return (
+          <div key={i}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 14, height: 14, borderRadius: 4, background: c.color }} />
+                <span style={{ fontSize: 15, fontWeight: 600, color: "var(--c-text)" }}>{c.name}</span>
+                <span style={{ fontSize: 12, color: "var(--c-text-sub)" }}>{c.desc}</span>
+              </div>
+              <span style={{ fontSize: 22, fontWeight: 800, fontFamily: "'Outfit',sans-serif", color: c.color }}>{c.value.toFixed(1)}</span>
+            </div>
+            <div style={{ height: 18, borderRadius: 9, background: "var(--c-bar-bg)", overflow: "hidden" }}>
+              <div style={{
+                width: `${pct}%`, height: "100%", borderRadius: 9, background: `linear-gradient(90deg, ${c.color}cc, ${c.color})`,
+                transition: "width .8s cubic-bezier(.25,.8,.25,1)",
+                boxShadow: `0 2px 8px ${c.color}40`
+              }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App() {
-  const [phase, setPhase] = useState("intro"); // intro, survey, result, dashboard
+  const [phase, setPhase] = useState("intro");
   const [company, setCompany] = useState("");
   const [userName, setUserName] = useState("");
   const [answers, setAnswers] = useState(Array(12).fill(0));
   const [current, setCurrent] = useState(0);
   const [allData, setAllData] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const stored = localStorage.getItem("q12-all-data");
-        if (stored) setAllData(JSON.parse(stored));
-      } catch {}
-      setLoading(false);
-    })();
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(SCRIPT_URL);
+      const rows = await res.json();
+      const grouped = {};
+      rows.forEach((row) => {
+        const comp = row.company || "미지정";
+        if (!grouped[comp]) grouped[comp] = [];
+        grouped[comp].push({
+          name: row.name || "",
+          answers: [
+            Number(row.q1), Number(row.q2), Number(row.q3), Number(row.q4),
+            Number(row.q5), Number(row.q6), Number(row.q7), Number(row.q8),
+            Number(row.q9), Number(row.q10), Number(row.q11), Number(row.q12),
+          ],
+          ts: row.timestamp,
+        });
+      });
+      setAllData(grouped);
+    } catch (err) {
+      console.error("데이터 로딩 실패:", err);
+    }
+    setLoading(false);
   }, []);
 
-  const saveData = useCallback(async (newData) => {
-    setAllData(newData);
-    try { localStorage.setItem("q12-all-data", JSON.stringify(newData)); } catch {}
-  }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await fetch(SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ company, name: userName, answers }),
+      });
+      await fetchData();
+    } catch (err) {
+      console.error("제출 실패:", err);
+    }
+    setSubmitting(false);
+    setPhase("result");
+  };
 
   const handleAnswer = (val) => {
     const next = [...answers];
     next[current] = val;
     setAnswers(next);
-    if (current < 11) setCurrent(current + 1);
-  };
-
-  const submit = async () => {
-    const entry = { name: userName, answers, ts: Date.now() };
-    const updated = { ...allData };
-    if (!updated[company]) updated[company] = [];
-    updated[company] = [...updated[company], entry];
-    await saveData(updated);
-    setPhase("result");
+    if (current < 11) setTimeout(() => setCurrent(current + 1), 150);
   };
 
   const companyStats = (comp) => {
@@ -161,7 +213,7 @@ export default function App() {
     .logo { font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--c-accent); margin-bottom: 6px; }
     h1 { font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 28px; margin-bottom: 8px; }
     .sub { color: var(--c-text-sub); font-size: 14px; line-height: 1.6; margin-bottom: 28px; }
-    .card { background: var(--c-card); border: 1px solid var(--c-border); border-radius: 14px; padding: 24px; margin-bottom: 16px; }
+    .card { background: var(--c-card); border: 1px solid var(--c-border); border-radius: 14px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
     input[type=text] { width: 100%; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--c-border); background: var(--c-card2); color: var(--c-text); font-size: 15px; font-family: inherit; outline: none; transition: border .2s; }
     input[type=text]:focus { border-color: var(--c-accent); }
     .btn { display:inline-flex; align-items:center; justify-content:center; padding: 12px 28px; border-radius: 10px; border:none; font-size:15px; font-weight:600; font-family:inherit; cursor:pointer; transition: all .2s; }
@@ -171,7 +223,7 @@ export default function App() {
     .btn-ghost { background:transparent; color:var(--c-text-sub); border:1px solid var(--c-border); }
     .btn-ghost:hover { background:var(--c-hover); color:var(--c-text); }
     .likert { display:flex; gap:8px; margin-top:16px; }
-    .likert button { flex:1; padding:14px 0; border-radius:10px; border:2px solid var(--c-border); background:var(--c-card2); color:var(--c-text); font-size:16px; font-weight:600; cursor:pointer; transition:all .15s; font-family:inherit; }
+    .likert button { flex:1; padding:14px 0; border-radius:10px; border:2px solid var(--c-border); background:var(--c-card); color:var(--c-text); font-size:16px; font-weight:600; cursor:pointer; transition:all .15s; font-family:inherit; }
     .likert button:hover { border-color:var(--c-accent); background:#e0edcf; }
     .likert button.sel { border-color:var(--c-accent); background:var(--c-accent); color:#fff; }
     .progress-bar { height:4px; border-radius:4px; background:var(--c-bar-bg); margin-bottom:24px; overflow:hidden; }
@@ -188,30 +240,30 @@ export default function App() {
     .tab:hover:not(.active) { background:var(--c-hover); color:var(--c-text); }
     .fade-in { animation: fadeIn .4s ease; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    .spinner { display:inline-block; width:18px; height:18px; border:2px solid #fff4; border-top-color:#fff; border-radius:50%; animation:spin .6s linear infinite; margin-right:8px; }
+    @keyframes spin { to{transform:rotate(360deg)} }
   `;
 
-  if (loading) return <div><style>{css}</style><div className="wrap" style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh"}}><p style={{color:"var(--c-text-sub)"}}>로딩 중...</p></div></div>;
-
-  // INTRO
   if (phase === "intro") {
     const companies = Object.keys(allData);
     return (
       <div><style>{css}</style>
-        <div className="wrap fade-in"><div className="brand-header"><span>퍼포먼스플러스랩</span></div>
+        <div className="wrap fade-in">
+          <div className="brand-header"><span>퍼포먼스플러스랩</span></div>
           <div className="logo">Gallup Q12</div>
           <h1>직원 몰입도 진단</h1>
           <p className="sub">갤럽 Q12는 직원의 업무 몰입도를 측정하는 12개 핵심 문항으로 구성됩니다.<br/>회사명을 입력하면 동일 회사의 응답이 누적되어 통계를 확인할 수 있습니다.</p>
-
           <div className="card">
-            <label style={{fontSize:13,color:"var(--c-text-sub)",marginBottom:6,display:"block"}}>회사명</label>
+            <label style={{fontSize:13,color:"var(--c-text-sub)",marginBottom:6,display:"block"}}>회사명 *</label>
             <input type="text" placeholder="예: 퍼포먼스플러스랩" value={company} onChange={e=>setCompany(e.target.value)} />
             <div style={{height:12}}/>
             <label style={{fontSize:13,color:"var(--c-text-sub)",marginBottom:6,display:"block"}}>이름 (선택)</label>
             <input type="text" placeholder="홍길동" value={userName} onChange={e=>setUserName(e.target.value)} />
             <div style={{height:16}}/>
-            <button className="btn btn-primary" style={{width:"100%"}} disabled={!company.trim()} onClick={()=>{setCurrent(0);setAnswers(Array(12).fill(0));setPhase("survey")}}>진단 시작하기</button>
+            <button className="btn btn-primary" style={{width:"100%"}} disabled={!company.trim() || loading} onClick={()=>{setCurrent(0);setAnswers(Array(12).fill(0));setPhase("survey")}}>
+              {loading ? <><span className="spinner"/>로딩 중...</> : "진단 시작하기"}
+            </button>
           </div>
-
           {companies.length > 0 && (
             <div style={{marginTop:24}}>
               <p style={{fontSize:14,fontWeight:600,marginBottom:12}}>📊 대시보드 바로가기</p>
@@ -227,13 +279,13 @@ export default function App() {
     );
   }
 
-  // SURVEY
   if (phase === "survey") {
     const done = answers[current] > 0;
     const allDone = answers.every(a => a > 0);
     return (
       <div><style>{css}</style>
-        <div className="wrap fade-in"><div className="brand-header"><span>퍼포먼스플러스랩</span></div>
+        <div className="wrap fade-in">
+          <div className="brand-header"><span>퍼포먼스플러스랩</span></div>
           <div className="logo">{company}</div>
           <div className="progress-bar"><div className="progress-fill" style={{width:`${((current+1)/12)*100}%`}}/></div>
           <div className="card" key={current}>
@@ -255,7 +307,9 @@ export default function App() {
             {current < 11 ? (
               <button className="btn btn-primary" disabled={!done} onClick={()=>setCurrent(current+1)}>다음 →</button>
             ) : (
-              <button className="btn btn-primary" disabled={!allDone} onClick={submit}>결과 보기</button>
+              <button className="btn btn-primary" disabled={!allDone || submitting} onClick={submit}>
+                {submitting ? <><span className="spinner"/>제출 중...</> : "결과 보기"}
+              </button>
             )}
           </div>
         </div>
@@ -263,42 +317,53 @@ export default function App() {
     );
   }
 
-  // RESULT
   if (phase === "result") {
     const my = myStats();
     const cs = companyStats(company);
     return (
       <div><style>{css}</style>
-        <div className="wrap fade-in"><div className="brand-header"><span>퍼포먼스플러스랩</span></div>
+        <div className="wrap fade-in">
+          <div className="brand-header"><span>퍼포먼스플러스랩</span></div>
           <div className="logo">진단 결과</div>
           <h1>{userName || "나"}의 Q12 결과</h1>
-          <p className="sub">{company} 소속 · 전체 평균과 비교</p>
-
+          <p className="sub">{company} 소속 · 전체 평균 {my.overall.toFixed(1)}점</p>
+          <div className="card">
+            <p style={{fontSize:15,fontWeight:700,marginBottom:18}}>🌿 나의 영역별 점수</p>
+            <CategoryBarChart catAvgs={my.catAvgs} />
+          </div>
           <div className="grid2">
             <div className="card" style={{textAlign:"center"}}>
               <div className="score-big">{my.overall.toFixed(1)}</div>
               <div className="score-label">나의 전체 평균</div>
             </div>
             <div className="card" style={{textAlign:"center"}}>
-              <div className="score-big" style={{color:"#059669"}}>{cs ? cs.overall.toFixed(1) : "—"}</div>
+              <div className="score-big" style={{color:"#5a9e8f"}}>{cs ? cs.overall.toFixed(1) : "—"}</div>
               <div className="score-label">{company} 평균 (n={cs?.count||0})</div>
             </div>
           </div>
-
-          <div className="card">
-            <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>영역별 점수</p>
-            {my.catAvgs.map((c,i)=>(
-              <Bar key={i} label={`${c.name} (${c.desc})`} value={c.value} color={c.color} />
-            ))}
-          </div>
-
+          {cs && cs.count > 1 && (
+            <div className="card">
+              <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>나 vs 회사 평균 비교</p>
+              {CATEGORIES.map((c,i)=>(
+                <div key={i} style={{marginBottom:12}}>
+                  <div style={{fontSize:13,fontWeight:600,marginBottom:4,color:c.color}}>{c.name}</div>
+                  <div style={{display:"flex",gap:12,fontSize:13,color:"var(--c-text-sub)"}}>
+                    <span>나: <b style={{color:"var(--c-text)"}}>{my.catAvgs[i].value.toFixed(1)}</b></span>
+                    <span>회사: <b style={{color:"var(--c-text)"}}>{cs.catAvgs[i].value.toFixed(1)}</b></span>
+                    <span style={{color: my.catAvgs[i].value >= cs.catAvgs[i].value ? "#4a8c2a" : "#c44"}}>
+                      {my.catAvgs[i].value >= cs.catAvgs[i].value ? "▲" : "▼"} {Math.abs(my.catAvgs[i].value - cs.catAvgs[i].value).toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="card">
             <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>문항별 점수</p>
             {Q12.map((q,i)=>(
-              <Bar key={i} label={`Q${i+1}`} value={answers[i]} color={CATEGORIES.find(c=>i>=c.range[0]&&i<=c.range[1]).color} />
+              <Bar key={i} label={`Q${i+1}. ${q.length>28?q.slice(0,28)+"…":q}`} value={answers[i]} color={CATEGORIES.find(c=>i>=c.range[0]&&i<=c.range[1]).color} />
             ))}
           </div>
-
           <div style={{display:"flex",gap:8,marginTop:8}}>
             <button className="btn btn-primary" onClick={()=>{setPhase("dashboard")}}>회사 대시보드 →</button>
             <button className="btn btn-ghost" onClick={()=>{setPhase("intro");setAnswers(Array(12).fill(0));setCurrent(0);}}>처음으로</button>
@@ -308,25 +373,25 @@ export default function App() {
     );
   }
 
-  // DASHBOARD
   if (phase === "dashboard") {
     const companies = Object.keys(allData);
     const [selComp, setSelComp] = useState(company || companies[0] || "");
     const cs = companyStats(selComp);
-
     return (
       <div><style>{css}</style>
-        <div className="wrap fade-in"><div className="brand-header"><span>퍼포먼스플러스랩</span></div>
+        <div className="wrap fade-in">
+          <div className="brand-header"><span>퍼포먼스플러스랩</span></div>
           <div className="logo">Dashboard</div>
           <h1>회사별 Q12 대시보드</h1>
           <p className="sub">회사를 선택하면 누적된 응답의 평균 통계를 확인할 수 있습니다.</p>
-
           <div className="tab-row">
             {companies.map(c=>(
               <button key={c} className={`tab ${selComp===c?"active":""}`} onClick={()=>setSelComp(c)}>{c} ({allData[c].length})</button>
             ))}
+            <button className="btn btn-ghost" style={{fontSize:12,padding:"6px 14px"}} onClick={fetchData}>
+              {loading ? "새로고침 중..." : "🔄 새로고침"}
+            </button>
           </div>
-
           {cs ? (
             <>
               <div className="grid2">
@@ -339,32 +404,26 @@ export default function App() {
                   <div className="score-label">총 응답자 수</div>
                 </div>
               </div>
-
               <div className="card" style={{display:"flex",justifyContent:"center"}}>
-                <RadarChart data={cs.catAvgs.map(c=>({value:c.value,label:c.name}))} />
+                <RadarChart data={cs.catAvgs.map(c=>({value:c.value,label:c.name,color:c.color}))} />
               </div>
-
               <div className="card">
                 <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>영역별 평균</p>
-                {cs.catAvgs.map((c,i)=>(
-                  <Bar key={i} label={`${c.name} (${c.desc})`} value={c.value} color={c.color} count={cs.count} />
-                ))}
+                <CategoryBarChart catAvgs={cs.catAvgs} />
               </div>
-
               <div className="card">
                 <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>문항별 평균</p>
                 {Q12.map((q,i)=>(
                   <Bar key={i} label={`Q${i+1}. ${q.length>28?q.slice(0,28)+"…":q}`} value={cs.qAvgs[i]} color={CATEGORIES.find(c=>i>=c.range[0]&&i<=c.range[1]).color} count={cs.count} />
                 ))}
               </div>
-
               <div className="card">
                 <p style={{fontSize:14,fontWeight:600,marginBottom:14}}>응답자 목록</p>
                 <div style={{fontSize:13,color:"var(--c-text-sub)"}}>
                   {allData[selComp].map((e,i)=>(
-                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--c-border)"}}>
-                      <span>{e.name||`응답자 ${i+1}`}</span>
-                      <span>평균 {avg(e.answers).toFixed(2)}</span>
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--c-border)"}}>
+                      <span style={{color:"var(--c-text)"}}>{e.name||`응답자 ${i+1}`}</span>
+                      <span style={{fontWeight:600}}>평균 {avg(e.answers).toFixed(2)}</span>
                     </div>
                   ))}
                 </div>
@@ -375,17 +434,8 @@ export default function App() {
               아직 응답 데이터가 없습니다.
             </div>
           )}
-
           <div style={{display:"flex",gap:8,marginTop:8}}>
             <button className="btn btn-ghost" onClick={()=>{setPhase("intro");setAnswers(Array(12).fill(0));setCurrent(0);}}>← 처음으로</button>
-            <button className="btn btn-ghost" style={{color:"#ef4444",borderColor:"#ef4444"}} onClick={async()=>{
-              if(confirm(`${selComp}의 모든 데이터를 삭제할까요?`)){
-                const updated={...allData};
-                delete updated[selComp];
-                await saveData(updated);
-                setSelComp(Object.keys(updated)[0]||"");
-              }
-            }}>데이터 초기화</button>
           </div>
         </div>
       </div>
